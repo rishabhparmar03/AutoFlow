@@ -136,15 +136,19 @@ export class VaultEngine extends EventEmitter {
         if (this.sessionPassword && Date.now() - this.lastActivityTimestamp <= IDLE_TIMEOUT_MS) {
             return true;
         }
-        // ponytail: 15-min CLI session cache file check
+        // Machine-bound encrypted 15-min CLI session cache
         const sessionPath = path.join(os.homedir(), '.autoflow', 'session.lock');
         try {
             if (fs.existsSync(sessionPath)) {
                 const session = JSON.parse(fs.readFileSync(sessionPath, 'utf-8'));
-                if (session.expiresAt && Date.now() < session.expiresAt && session.password) {
-                    this.sessionPassword = session.password;
-                    this.resetActivity();
-                    return true;
+                if (session.expiresAt && Date.now() < session.expiresAt && session.encrypted) {
+                    const machineKey = `${os.hostname()}-${os.userInfo().username}-${os.arch()}`;
+                    const recovered = decryptWithPassword(session.encrypted, machineKey);
+                    if (recovered) {
+                        this.sessionPassword = recovered;
+                        this.resetActivity();
+                        return true;
+                    }
                 }
             }
         } catch {}
@@ -191,10 +195,12 @@ export class VaultEngine extends EventEmitter {
             this.failedAttempts = 0;
             this.sessionPassword = password;
             this.resetActivity();
-            // ponytail: save 15-min CLI session cache
+            // Save encrypted 15-min CLI session cache
             try {
                 const sessionPath = path.join(os.homedir(), '.autoflow', 'session.lock');
-                fs.writeFileSync(sessionPath, JSON.stringify({ password, expiresAt: Date.now() + IDLE_TIMEOUT_MS }), { mode: 0o600 });
+                const machineKey = `${os.hostname()}-${os.userInfo().username}-${os.arch()}`;
+                const encrypted = encryptWithPassword(password, machineKey);
+                fs.writeFileSync(sessionPath, JSON.stringify({ encrypted, expiresAt: Date.now() + IDLE_TIMEOUT_MS }), { mode: 0o600 });
             } catch {}
             this.emit('lock-state-change', false);
             return true;

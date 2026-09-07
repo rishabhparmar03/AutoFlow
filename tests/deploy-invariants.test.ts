@@ -57,11 +57,15 @@ function runInvariantsCheck() {
     assert(nginxServiceContent.includes('sudo rm -f ${enabledPath}'), 'Invariant Violated: nginxService must remove candidate symlink on failure.');
     console.log('✔ Invariant 5 passed: Nginx configuration failure cleans up candidate symlink to protect server.');
 
-    console.log('\nAll Ponytail deployment invariants passed successfully! 🚀');
+    console.log('\nAll deployment invariants passed successfully! 🚀');
 }
 
-describe('Deploy Invariants Check (Ponytail)', () => {
-    it('should satisfy all deployment pipeline invariants', () => {
-        runInvariantsCheck();
+if (typeof describe === 'function') {
+    describe('Deploy Invariants Check', () => {
+        it('should satisfy all deployment pipeline invariants', () => {
+            runInvariantsCheck();
+        });
     });
-});
+} else {
+    runInvariantsCheck();
+}

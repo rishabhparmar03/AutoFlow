@@ -38,15 +38,15 @@ async function stop(isDesktop: boolean = false, projectDir: string = process.cwd
         const safeProjectName = escapeShellArg(config.projectName);
         const safeRemoteProjectDir = escapeShellArg(remoteProjectDir);
 
-        // 1. Stop & remove container
+        // 1. Stop container (keep container and rollback snapshot for recovery)
         log.info('Stopping container...');
         await execSafe(ssh, `docker stop ${safeContainer}`);
 
-        log.info('Removing container...');
-        await execSafe(ssh, `docker rm ${safeContainer}`);
-
-        // Also clean up the rollback snapshot if it exists
-        await execSafe(ssh, `docker rm -f ${safeContainer}_rollback || true`);
+        // Note: We intentionally do NOT rm -f ${safeContainer}_rollback so that rollback snapshot is preserved.
+        try {
+            const { deployerEngine } = require('../core/deployer');
+            deployerEngine.logContainerAction(config.projectName, 'Stopped');
+        } catch {}
 
         // 2. Prune dangling builder images for this project
         log.info('Pruning unused Docker builder images...');

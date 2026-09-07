@@ -452,7 +452,8 @@ export function registerIpcHandlers(mainWindow: BrowserWindow) {
             } catch {}
         }
 
-        // Run git checkout & deployment in background so UI doesn't hang
+        // Run git checkout & deployment in background so UI doesn't hang,
+        // but ensure checkout back to originalBranch happens strictly AFTER deploy finishes
         (async () => {
             try {
                 spawnSync('git', ['checkout', commitSha], { cwd: projectPath, stdio: 'ignore' });

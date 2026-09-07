@@ -69,11 +69,14 @@ async function deploy(isDesktop: boolean = false, projectDir: string = process.c
 
     // Top-level catch — ensures NO raw stack traces ever reach the user
     let fatalErr: unknown = null;
+    const deployStartTime = Date.now();
+    let configProjectName = '';
     try {
         // ── Step 1: Load config ──────────────────────────────────────────────
         log.header('AUTOFLOW DEPLOY');
         const dir = typeof projectDir === 'string' ? projectDir : process.cwd();
         const config = loadConfig(dir);
+        configProjectName = config.projectName;
 
         const remoteProjectDir = `/home/${config.sshUser}/apps/${config.projectName}`;
         const image = `${config.projectName}:latest`;
@@ -191,6 +194,22 @@ async function deploy(isDesktop: boolean = false, projectDir: string = process.c
 
             log.header('DEPLOYMENT COMPLETE 🚀');
 
+            // Save history for CLI runs (ensures Dashboard Timeline & Recent Activity always sync)
+            if (!isDesktop) {
+                try {
+                    const { deployerEngine } = require('../../core/deployer');
+                    deployerEngine.saveHistoryItem(config.projectName, {
+                        id: `dep-${Date.now()}`,
+                        sequence: deployerEngine.getHistory(config.projectName).length + 1,
+                        timestamp: Date.now(),
+                        duration: Math.round((Date.now() - deployStartTime) / 1000),
+                        status: 'Live',
+                        notes: 'Deployed via CLI',
+                        commitSha: sha ? sha.substring(0, 7) : 'N/A'
+                    });
+                } catch {}
+            }
+
         } finally {
             try {
                 unregisterCleanupHandlers(ssh);
@@ -205,6 +224,20 @@ async function deploy(isDesktop: boolean = false, projectDir: string = process.c
 
     } catch (err: unknown) {
         fatalErr = err;
+        if (!isDesktop) {
+            try {
+                const { deployerEngine } = require('../../core/deployer');
+                deployerEngine.saveHistoryItem(configProjectName || 'Unknown', {
+                    id: `dep-${Date.now()}`,
+                    sequence: deployerEngine.getHistory(configProjectName || 'Unknown').length + 1,
+                    timestamp: Date.now(),
+                    duration: Math.round((Date.now() - deployStartTime) / 1000),
+                    status: 'Failed',
+                    notes: (err as any)?.message || 'Deployment failed',
+                    commitSha: 'N/A'
+                });
+            } catch {}
+        }
     } finally {
         // Lock file is ALWAYS cleaned up before process.exit
         if (fs.existsSync(LOCK_FILE)) {
