@@ -15,6 +15,7 @@ export interface ServerStats {
         name: string;
         cpu: string;
         mem: string;
+        disk?: string;
         status: string;
     }>;
 }
@@ -40,6 +41,7 @@ export class MonitorEngine {
 
                 ps_out=$(docker ps -a --format '{{.Names}}#{{.Status}}' 2>/dev/null)
                 stats_out=$(docker stats --no-stream --format '{{.Name}}#{{.CPUPerc}}#{{.MemUsage}}' 2>/dev/null)
+                size_out=$(docker ps -a -s --format '{{.Names}}#{{.Size}}' 2>/dev/null)
 
                 echo -n "{\\"cpu\\":\\"$cpu\\",\\"ram\\":\\"$ram\\",\\"disk\\":\\"$disk\\",\\"uptime\\":\\"$uptime_val\\",\\"docker\\":["
                 first=1
@@ -51,12 +53,19 @@ export class MonitorEngine {
                     
                     cpu_usage="0%"
                     mem_usage="0MB"
+                    disk_usage="0B"
                     stats_line=$(echo "$stats_out" | grep "^$name#" || true)
                     if [ -n "$stats_line" ]; then
                         cpu_usage=$(echo "$stats_line" | cut -d'#' -f2)
                         mem_usage=$(echo "$stats_line" | cut -d'#' -f3 | awk '{print $1}')
                     fi
-                    echo -n "{\\"name\\":\\"$name\\",\\"status\\":\\"$status\\",\\"cpu\\":\\"$cpu_usage\\",\\"mem\\":\\"$mem_usage\\"}"
+                    size_line=$(echo "$size_out" | grep "^$name#" || true)
+                    if [ -n "$size_line" ]; then
+                        disk_raw=$(echo "$size_line" | cut -d'#' -f2)
+                        # Format "252MB (virtual 2.19GB)" -> extract clean string
+                        disk_usage="$disk_raw"
+                    fi
+                    echo -n "{\\"name\\":\\"$name\\",\\"status\\":\\"$status\\",\\"cpu\\":\\"$cpu_usage\\",\\"mem\\":\\"$mem_usage\\",\\"disk\\":\\"$disk_usage\\"}"
                 done <<< "$ps_out"
                 echo -n "]}"
             `;

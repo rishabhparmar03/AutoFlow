@@ -192,19 +192,20 @@ export const LiveStatus: React.FC<LiveStatusProps> = ({ stats, loading, error, o
                                 <th style={{ padding: '12px 16px', fontWeight: 600 }}>Status</th>
                                 <th style={{ padding: '12px 16px', fontWeight: 600 }}>CPU %</th>
                                 <th style={{ padding: '12px 16px', fontWeight: 600 }}>Memory Usage</th>
+                                <th style={{ padding: '12px 16px', fontWeight: 600 }}>Disk Usage</th>
                                 <th style={{ padding: '12px 16px', fontWeight: 600, textAlign: 'right' }}>Actions</th>
                             </tr>
                         </thead>
                         <tbody>
                             {!stats ? (
                                 <tr>
-                                    <td colSpan={5} style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                                    <td colSpan={6} style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)' }}>
                                         Fetching remote container metrics...
                                     </td>
                                 </tr>
                             ) : stats.containers.length === 0 ? (
                                 <tr>
-                                    <td colSpan={5} style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                                    <td colSpan={6} style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)' }}>
                                         No active Docker containers running on the remote host.
                                     </td>
                                 </tr>
@@ -235,6 +236,9 @@ export const LiveStatus: React.FC<LiveStatusProps> = ({ stats, loading, error, o
                                             </td>
                                             <td style={{ padding: '12px 16px', fontFamily: 'monospace', color: 'var(--text-secondary)' }}>
                                                 {container.mem}
+                                            </td>
+                                            <td style={{ padding: '12px 16px', fontFamily: 'monospace', color: 'var(--text-secondary)' }}>
+                                                {container.disk || '0B'}
                                             </td>
                                             <td style={{ padding: '12px 16px', textAlign: 'right' }}>
                                                 <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>

@@ -247,9 +247,7 @@ export async function initProjectCore(projectPath: string, options: InitOptions)
                 let providerContent = fs.readFileSync(appProviderPath, 'utf-8');
                 if (!providerContent.includes('forceScheme')) {
                     const snippet = `
-        if (app()->environment('production', 'staging') || request()->header('x-forwarded-proto') === 'https' || (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https')) {
-            \\Illuminate\\Support\\Facades\\URL::forceScheme('https');
-        }
+        \\Illuminate\\Support\\Facades\\URL::forceScheme('https');
 `;
                     if (/public\s+function\s+boot\s*\([^)]*\)\s*:\s*void\s*\{/i.test(providerContent)) {
                         providerContent = providerContent.replace(/(public\s+function\s+boot\s*\([^)]*\)\s*:\s*void\s*\{)/i, `$1${snippet}`);
@@ -259,10 +257,34 @@ export async function initProjectCore(projectPath: string, options: InitOptions)
                         providerContent = providerContent.replace(/class\s+AppServiceProvider\s+extends\s+\w+\s*\{/i, `$&\n    public function boot(): void\n    {${snippet}    }\n`);
                     }
                     fs.writeFileSync(appProviderPath, providerContent);
-                    log.success('AppServiceProvider.php updated with HTTPS reverse-proxy handling');
+                    log.success('AppServiceProvider.php updated with HTTPS forceScheme');
                 }
             } catch (err) {
                 log.warning(`Could not modify AppServiceProvider.php safely: ${err instanceof Error ? err.message : String(err)}`);
+            }
+        }
+
+        // Laravel 11 trustProxies in bootstrap/app.php
+        if (fs.existsSync(bootstrapAppPath)) {
+            try {
+                let bootstrapContent = fs.readFileSync(bootstrapAppPath, 'utf-8');
+                if (!bootstrapContent.includes('trustProxies')) {
+                    if (bootstrapContent.includes('->withMiddleware(function (Middleware $middleware)')) {
+                        bootstrapContent = bootstrapContent.replace(
+                            /->withMiddleware\(function\s*\(Middleware\s*\$middleware\)\s*(?::\s*void)?\s*\{/i,
+                            `$&\\n        $middleware->trustProxies(at: '*');`
+                        );
+                    } else {
+                        bootstrapContent = bootstrapContent.replace(
+                            /->withMiddleware\(function\s*\(Middleware\s*\$middleware\)\s*\{/i,
+                            `$&\\n        $middleware->trustProxies(at: '*');`
+                        );
+                    }
+                    fs.writeFileSync(bootstrapAppPath, bootstrapContent);
+                    log.success('bootstrap/app.php updated with trustProxies');
+                }
+            } catch (err) {
+                log.warning(`Could not modify bootstrap/app.php safely: ${err instanceof Error ? err.message : String(err)}`);
             }
         }
     }
