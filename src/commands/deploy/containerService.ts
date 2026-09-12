@@ -110,24 +110,67 @@ export async function verifyContainerHealth(
     containerName: string,
     hostPort?: string
 ): Promise<void> {
-    log.info('Verifying container health...');
+    log.info('Verifying container health and readiness...');
 
     let isHealthy = false;
     let attempts = 0;
-    const maxAttempts = 5;
-    const intervalMs = 2000;
+    // Production tolerance: Fullstack apps (Laravel/Node/Python) running migrations or
+    // booting sub-services require up to 30-45 seconds to bind to port.
+    const maxAttempts = 15;
+    const intervalMs = 3000;
     let lastProbeResult = { healthy: false, code: '' };
+    const safeContainer = escapeShellArg(containerName);
 
     while (attempts < maxAttempts) {
         attempts++;
-        const ps = await ssh.execCommand(
-            `docker ps --filter ${escapeShellArg(`name=^/${containerName}$`)} --format "{{.Status}}"`
-        );
 
-        // Must be Up and not reported as (unhealthy) by Docker's internal HEALTHCHECK
-        const status = ps.stdout || '';
-        if (status.includes('Up') && !status.includes('(unhealthy)')) {
-            // Ponytail: Run HTTP check if port is available
+        // 1. Inspect container process state via inspect or ps
+        const inspectRes = await ssh.execCommand(
+            `docker inspect -f '{{.State.Status}} {{.State.ExitCode}} {{.State.Health.Status}}' ${safeContainer} 2>/dev/null || docker ps -a --filter ${escapeShellArg(`name=^/${containerName}$`)} --format "{{.Status}}"`
+        );
+        const rawOutput = (inspectRes.stdout || '').trim();
+        let stateStatus = 'not_found';
+        let exitCode = 0;
+        let isHealthyState = false;
+
+        if (rawOutput.includes('Up') || rawOutput.startsWith('running')) {
+            stateStatus = 'running';
+        } else if (rawOutput.includes('Exited') || rawOutput.startsWith('exited') || rawOutput.startsWith('dead')) {
+            stateStatus = 'exited';
+            const exitMatch = rawOutput.match(/\((\d+)\)/);
+            if (exitMatch) exitCode = parseInt(exitMatch[1], 10);
+        }
+
+        // Fast-fail: if container died or exited, abort immediately instead of hanging
+        if (stateStatus === 'exited' || stateStatus === 'dead') {
+            const logs = await ssh.execCommand(`docker logs --tail 40 ${safeContainer}`);
+            log.error('\n=== CONTAINER CRASH LOGS (Process terminated) ===');
+            log.error(logs.stdout || logs.stderr || '(No logs emitted)');
+            log.error('================================================\n');
+
+            throw new AutoFlowError(
+                `Container "${containerName}" failed to start or exited immediately (exit code: ${exitCode}).`,
+                EXIT_CODES.CONTAINER_FAILED,
+                'containerService'
+            );
+        }
+
+        // Fast-fail if Docker's internal HEALTHCHECK explicitly flagged it as unhealthy
+        if (rawOutput.includes('unhealthy')) {
+            const logs = await ssh.execCommand(`docker logs --tail 40 ${safeContainer}`);
+            log.error('\n=== CONTAINER LOGS (Docker Healthcheck Failed) ===');
+            log.error(logs.stdout || logs.stderr || '(No logs emitted)');
+            log.error('================================================\n');
+
+            throw new AutoFlowError(
+                `Container "${containerName}" was marked unhealthy by Docker healthcheck.`,
+                EXIT_CODES.CONTAINER_FAILED,
+                'containerService'
+            );
+        }
+
+        // 2. If running, probe HTTP readiness
+        if (stateStatus === 'running') {
             if (hostPort) {
                 const probe = await probeContainerHttp(ssh, containerName, hostPort);
                 lastProbeResult = probe;
@@ -142,23 +185,24 @@ export async function verifyContainerHealth(
         }
 
         if (attempts < maxAttempts) {
-            log.info(`  ... Container initializing (HTTP ${lastProbeResult.code || 'waiting'}), retrying (${attempts}/${maxAttempts})...`);
+            const elapsed = attempts * (intervalMs / 1000);
+            log.info(`  ... Service initializing (${lastProbeResult.code ? `HTTP ${lastProbeResult.code}` : 'binding port'}, ${elapsed}s elapsed, attempt ${attempts}/${maxAttempts})...`);
             await new Promise((resolve) => setTimeout(resolve, intervalMs));
         }
     }
 
     if (!isHealthy) {
-        const logs = await ssh.execCommand(`docker logs --tail 25 ${escapeShellArg(containerName)}`);
-        log.error('\n=== CONTAINER LOGS (last 25 lines) ===');
-        log.error(logs.stdout || logs.stderr);
-        log.error('======================================\n');
+        const logs = await ssh.execCommand(`docker logs --tail 40 ${safeContainer}`);
+        log.error('\n=== CONTAINER LOGS (Readiness Timeout) ===');
+        log.error(logs.stdout || logs.stderr || '(No logs emitted)');
+        log.error('==========================================\n');
 
         throw new AutoFlowError(
-            `Container "${containerName}" failed to start or exited immediately (health check failed, HTTP status: ${lastProbeResult.code || 'Down'}).`,
+            `Container "${containerName}" did not become ready within 45s (last HTTP status: ${lastProbeResult.code || 'Connection refused'}). Check if the web service inside the container is listening on the expected port.`,
             EXIT_CODES.CONTAINER_FAILED,
             'containerService'
         );
     }
 
-    log.success(`Container "${containerName}" is healthy (HTTP ${lastProbeResult.code}) ✔`);
+    log.success(`Container "${containerName}" is healthy and serving traffic (HTTP ${lastProbeResult.code}) ✔`);
 }
